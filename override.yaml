@@ -1,0 +1,7 @@
+
+cuda_compiler:
+- None
+cuda_compiler_version:
+- None
+docker_image:
+- e8035669/linux-anvil-armv7l
