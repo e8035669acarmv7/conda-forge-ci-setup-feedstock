@@ -56,7 +56,7 @@ if [[ "${HOST_PLATFORM}" != "${BUILD_PLATFORM}" ]]; then
                         (*) echo "" ;;
                     esac)
                 if [[ "${CUDA_MANIFEST_VERSION}" == "" ]]; then
-                    echo "cross compiling with cuda not in (11.2, 11.8, 12.0) not supported yet"
+                    echo 'cross compiling with cuda not in (11.2, 11.8, 12.*) not supported yet'
                     exit 1
                 fi
                 curl -L https://developer.download.nvidia.com/compute/cuda/repos/rhel8/${CUDA_HOST_PLATFORM_ARCH}/version_${CUDA_MANIFEST_VERSION}.json > manifest.json
@@ -79,6 +79,16 @@ if [[ "${HOST_PLATFORM}" != "${BUILD_PLATFORM}" ]]; then
                     "libnvjpeg_devel:libnvjpeg"
                     "cuda_compat:nvidia_driver"
                 )
+
+                # Some packages are added after CUDA 11.2+.
+                # Handle them seperately here.
+                # Take version info from packages available in the manifest.
+                if [[ "${CUDA_COMPILER_VERSION}" == "11.8" ]]; then
+                    DEVELS+=(
+                        "cuda_profiler_api:cuda_sanitizer_api"
+                    )
+                fi
+
                 # add additional packages to manifest with same version (and formatting)
                 # as for key "from_old" specified in the mapping above
                 for map in "${DEVELS[@]}"; do
@@ -95,10 +105,10 @@ if [[ "${HOST_PLATFORM}" != "${BUILD_PLATFORM}" ]]; then
                 # map names from spelling in manifest to RPMs: remove quotes; normalize "_" -> "-";
                 # also need to adapt "_dev" -> "-devel" (specifically for cuda_nvml_dev), which
                 # in turn requires us to undo the "overshoot" for the other devel-packages
-                sed 's/"//g' versions.txt | sed 's/_/-/g' | sed 's/-api//g' | sed 's/-dev/-devel/g' | sed 's/-develel/-devel/g' > rpms.txt
+                sed 's/"//g' versions.txt | sed 's/_/-/g' | sed 's/sanitizer-api/sanitizer/g' | sed 's/-dev/-devel/g' | sed 's/-develel/-devel/g' > rpms.txt
 
                 # filter packages from manifest down to what we need for cross-compilation
-                grep -E "cuda-(compat|cudart|cupti|driver|nvcc|nvml|nvprof|nvrtc|nvtx).*|lib(cu|npp|nvjpeg).*" rpms.txt > rpms_cc.txt
+                grep -E "cuda-(cccl|compat|cudart|cupti|driver|nvcc|nvml|nvprof|nvrtc|nvtx|profiler).*|lib(cu|npp|nvjpeg).*" rpms.txt > rpms_cc.txt
 
                 echo "Installing the following packages (<pkg>:<version>)"
                 cat rpms_cc.txt
@@ -132,16 +142,14 @@ if [[ "${HOST_PLATFORM}" != "${BUILD_PLATFORM}" ]]; then
         elif [[ "${CUDA_COMPILER_VERSION}" == "11.8" ]]; then
             echo "cross compiling with cuda == 11.8 and cdt != cos7/8 not supported yet"
             exit 1
-        elif [[ "${CUDA_COMPILER_VERSION}" == "12.0" ]] && [[ "${CDT_NAME}" == "cos7" ]]; then
+        elif [[ "${CUDA_COMPILER_VERSION}" == 12* ]] && [[ "${CDT_NAME}" == "cos7" ]]; then
             # No extra steps necessary for CUDA 12, handled through new packages
             true
-        elif [[ "${CUDA_COMPILER_VERSION}" == "12.0" ]]; then
-            echo "cross compiling with cuda == 12.0 and cdt != cos7 not supported yet"
+        elif [[ "${CUDA_COMPILER_VERSION}" == 12* ]]; then
+            echo 'cross compiling with cuda == 12.* and cdt != cos7 not supported yet'
             exit 1
         elif [[ "${CUDA_COMPILER_VERSION}" != "None" ]]; then
-            # FIXME: can use anaconda.org/nvidia packages to get the includes and libs
-            # for cuda >=11.3.
-            echo "cross compiling with cuda not in (11.2, 11.8, 12.0) not supported yet"
+            echo 'cross compiling with cuda not in (11.2, 11.8, 12.*) not supported yet'
             exit 1
         fi
     fi

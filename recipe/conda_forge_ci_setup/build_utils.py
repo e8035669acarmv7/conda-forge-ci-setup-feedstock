@@ -15,7 +15,7 @@ import click
 from conda_forge_ci_setup.upload_or_check_non_existence import retry_upload_or_check
 
 from .feedstock_outputs import STAGING
-
+from .utils import determine_build_tool, CONDA_BUILD
 
 call = subprocess.check_call
 
@@ -38,7 +38,6 @@ arg_recipe_root = click.argument(
 arg_config_file = click.argument(
     "config_file", type=click.Path(exists=True, file_okay=True, dir_okay=False)
 )
-
 
 def update_global_config(feedstock_root):
     """Merge the conda-forge.yml with predefined system defaults"""
@@ -144,10 +143,23 @@ def setup_conda_rc(feedstock_root, recipe_root, config_file):
     with open(config_file) as f:
         specific_config = safe_load(f)
         if "channel_sources" in specific_config:
-            # Due to rendering we may have more than one row for channel_sources
-            # if nothing gets zipped with it
-            first_row = specific_config["channel_sources"][0]  # type: str
-            channels = [c.strip() for c in first_row.split(",")]
+            channels = []
+            last_channel = None
+            for source in specific_config["channel_sources"]:
+                # channel_sources might be part of some zip_key
+                channels.extend([c.strip() for c in source.split(",")])
+
+                if last_channel is not None and last_channel != source:
+                    print(
+                        "WARNING: Differing channel_sources found in config file.\n"
+                        "When searching for a package conda-build will only consider "
+                        "the first channel that contains any version of the package "
+                        "due to strict channel priority.\n"
+                        "As all channel_source entries are added to the build environment, this could "
+                        "lead to unexpected behaviour."
+                    )
+                else:
+                    last_channel = source
         else:
             update_global_config(feedstock_root)
             channels = _global_config["channels"]["sources"]
@@ -173,6 +185,9 @@ def setup_conda_rc(feedstock_root, recipe_root, config_file):
 def upload_package(feedstock_root, recipe_root, config_file, validate, private, feedstock_name):
     if feedstock_name is None and validate:
         raise RuntimeError("You must supply the --feedstock-name option if validating!")
+    if feedstock_name and "/" in feedstock_name:
+        print("INFO: --feedstock-name should not contain slashes. Using the last component.")
+        feedstock_name = feedstock_name.split("/")[-1]
 
     specific_config = safe_load(open(config_file))
     if "channel_targets" in specific_config:
@@ -213,6 +228,18 @@ def upload_package(feedstock_root, recipe_root, config_file, validate, private, 
                     "is not allowed" % ("conda-forge", source_channel))
                 return
 
+    build_tool = determine_build_tool(feedstock_root)
+    if build_tool != CONDA_BUILD and upload_to_conda_forge:
+        # make sure that we are not uploading to the main conda-forge channel
+        # when building packages with `rattler-build`
+        if ["conda-forge", "main"] in channels:
+            print(
+                "Uploading to conda-forge's main channel is not yet allowed when building with rattler-build.\n"
+                "You can set a label channel in the channel_targets section of the config file\n"
+                "to upload to a label channel."
+            )
+            return
+
     # get the git sha of the current commit
     git_sha = subprocess.run(
         "git rev-parse HEAD",
@@ -231,11 +258,15 @@ def upload_package(feedstock_root, recipe_root, config_file, validate, private, 
         if validate and owner == "conda-forge":
             retry_upload_or_check(
                 feedstock_name, recipe_root, STAGING, channel,
-                [config_file], validate=True, git_sha=git_sha)
+                [config_file], validate=True, git_sha=git_sha,
+                feedstock_root=feedstock_root,
+            )
         else:
             retry_upload_or_check(
                 feedstock_name, recipe_root, owner, channel,
-                [config_file], validate=False, private_upload=private)
+                [config_file], validate=False, private_upload=private,
+                feedstock_root=feedstock_root,
+            )
 
 
 @click.command()
